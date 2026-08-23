@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="从 Python 面向对象、Flask 工程化后端到 jQuery/AJAX 的全栈 Web 开发学习手册">
+  <meta name="theme-color" content="#07111f">
+  <title>Flask Forge · Python 全栈开发手册</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem("flask-forge-theme-v1") || "cool"; }
+    catch (_) { document.documentElement.dataset.theme = "cool"; }
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="topbar">
+    <button class="icon-button mobile-only" id="menuButton" aria-label="打开课程目录">☰</button>
+    <a class="brand" href="#top" aria-label="返回首页">
+      <span class="brand-mark">F</span>
+      <span><strong>Flask Forge</strong><small>全栈开发手册</small></span>
+    </a>
+    <div class="top-actions">
+      <label class="search-box" for="globalSearch">
+        <span>⌕</span>
+        <input id="globalSearch" type="search" placeholder="搜索 Flask、ORM、AJAX…" autocomplete="off">
+        <kbd>Ctrl K</kbd>
+      </label>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换到暖色主题" aria-pressed="false" title="切换冷暖色调">
+        <span class="theme-orbit"><i class="cool-dot"></i><i class="warm-dot"></i></span>
+        <span class="theme-label desktop-only">冷色</span>
+      </button>
+      <button class="progress-pill" id="progressButton" title="查看学习进度">
+        <span id="progressRing" class="mini-ring">0%</span>
+        <span class="desktop-only">学习进度</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="app-shell" id="top">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <span class="eyebrow">LEARNING PATH</span>
+        <h2>课程目录</h2>
+        <p>从语法基础到生产部署</p>
+      </div>
+      <nav id="chapterNav" aria-label="课程章节"></nav>
+      <div class="sidebar-card">
+        <span class="status-dot"></span>
+        <div><strong>离线可阅读</strong><small>学习进度保存在本机</small></div>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim"></div>
+
+    <main class="main-content">
+      <section class="hero" id="home">
+        <div class="hero-copy">
+          <span class="hero-kicker"><i></i> FROM ZERO TO PRODUCTION</span>
+          <h1>掌握 Flask 全栈开发，<br><em>从理解到真正做出来。</em></h1>
+          <p>一套以工程实践为主线的中文学习手册。系统讲透 Python 面向对象、Flask 后端、数据库、安全、测试、部署，以及 jQuery 与 AJAX 前端协作。</p>
+          <div class="hero-actions">
+            <button class="primary-button" id="startLearning">开始学习 <span>→</span></button>
+            <button class="secondary-button" id="continueLearning">继续上次进度</button>
+          </div>
+          <div class="hero-meta">
+            <span>● <b id="heroChapterCount">24</b> 个系统章节</span><span>● <b id="heroSectionCount">125+</b> 个深度小节</span><span>● 1 个完整实战</span>
+          </div>
+        </div>
+        <div class="code-window" aria-label="Flask 代码预览">
+          <div class="window-bar"><span></span><span></span><span></span><b>app.py</b></div>
+          <pre><code><i>from</i> flask <i>import</i> Flask, jsonify
+
+app = Flask(__name__)
+
+<i>@app.get</i>(<s>"/api/hello"</s>)
+<i>def</i> <b>hello</b>():
+    <i>return</i> jsonify({
+        <s>"message"</s>: <s>"Hello, Full Stack!"</s>,
+        <s>"ready"</s>: <u>True</u>
+    })
+
+<small># 浏览器、API 与数据库从这里连接起来</small></code></pre>
+          <div class="terminal-line"><span>›</span> flask --app app run --debug <b>● running</b></div>
+        </div>
+      </section>
+
+      <section class="dashboard-strip" aria-label="课程概览">
+        <article><span class="metric-icon purple">⌘</span><div><strong>4</strong><small>学习阶段</small></div></article>
+        <article><span class="metric-icon cyan">{ }</span><div><strong id="chapterCount">24</strong><small>核心章节</small></div></article>
+        <article><span class="metric-icon amber">✓</span><div><strong id="completedCount">0</strong><small>已完成章节</small></div></article>
+        <article><span class="metric-icon green">∞</span><div><strong>终身</strong><small>本地可用</small></div></article>
+      </section>
+
+      <section class="path-section" id="learningPath">
+        <div class="section-heading">
+          <div><span class="eyebrow">CURRICULUM</span><h2>全栈能力路线图</h2></div>
+          <p>每个阶段都建立在前一阶段之上，建议按顺序学习，再用搜索作为开发时的速查手册。</p>
+        </div>
+        <div class="stage-grid">
+          <article class="stage-card" data-stage="0"><span>01</span><b>Python 地基</b><p>语法、函数、异常、模块与面向对象</p><i>语言基础 → OOP → 设计原则</i></article>
+          <article class="stage-card" data-stage="1"><span>02</span><b>Flask 后端</b><p>HTTP、路由、蓝图、数据库与安全</p><i>请求响应 → ORM → 鉴权</i></article>
+          <article class="stage-card" data-stage="2"><span>03</span><b>jQuery 前端</b><p>DOM、事件、表单、AJAX 与交互</p><i>选择器 → 事件 → API 联调</i></article>
+          <article class="stage-card" data-stage="3"><span>04</span><b>工程实战</b><p>测试、性能、部署与完整项目</p><i>质量保障 → 上线 → 迭代</i></article>
+        </div>
+      </section>
+
+      <section class="course-area" id="courseArea">
+        <div class="course-toolbar">
+          <div><span class="eyebrow">HANDBOOK</span><h2>课程正文</h2></div>
+          <div class="toolbar-actions">
+            <button id="expandAll">展开全部</button>
+            <button id="collapseAll">收起全部</button>
+          </div>
+        </div>
+        <div id="searchStatus" class="search-status" hidden></div>
+        <div id="courseContent"></div>
+      </section>
+
+      <section class="final-cta">
+        <span class="eyebrow">YOUR NEXT COMMIT</span>
+        <h2>知识只有进入项目，才真正属于你。</h2>
+        <p>完成全部章节后，打开项目中的示例应用，先运行，再改需求，最后脱离教程重写一遍。</p>
+        <button class="primary-button" data-jump="last">查看毕业项目验收清单 <span>→</span></button>
+      </section>
+      <footer><span>Flask Forge · 本地全栈学习手册</span><span>Python · Flask · SQLAlchemy · jQuery · AJAX</span></footer>
+    </main>
+  </div>
+
+  <button class="back-top" id="backTop" aria-label="回到顶部">↑</button>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="progressDialog">
+    <button class="dialog-close" aria-label="关闭">×</button>
+    <span class="eyebrow">YOUR PROGRESS</span>
+    <h2>学习进度</h2>
+    <div class="big-ring" id="bigProgress"><span>0%</span></div>
+    <p id="progressSummary">还没有完成任何章节，从第一章开始吧。</p>
+    <button class="danger-link" id="resetProgress">重置学习记录</button>
+  </dialog>
+
+  <script src="content.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

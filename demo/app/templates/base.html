@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TaskFlow{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('main.index') }}">Task<span>Flow</span></a>
+    <small>Flask + jQuery 完整链路演示</small>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='vendor/jquery-3.7.1.min.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

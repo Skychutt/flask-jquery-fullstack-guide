@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}任务面板 · TaskFlow{% endblock %}
+{% block content %}
+<section class="hero">
+  <span class="eyebrow">TODAY'S FOCUS</span>
+  <h1>把重要的事情，<br><em>一件一件完成。</em></h1>
+  <p>这个页面演示 Flask 路由、SQLAlchemy、JSON API、jQuery 事件委托和 AJAX CRUD 的完整协作。</p>
+</section>
+
+<section class="board">
+  <div class="panel-head">
+    <div><span class="eyebrow">TASK BOARD</span><h2>我的任务</h2></div>
+    <label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索任务"></label>
+  </div>
+
+  <form id="task-form" novalidate>
+    <div class="field">
+      <label for="title">新任务</label>
+      <div class="input-row">
+        <input id="title" name="title" maxlength="120" placeholder="例如：完成 JSON API 章节" autocomplete="off">
+        <button type="submit">添加任务</button>
+      </div>
+      <p class="field-error" id="title-error"></p>
+    </div>
+  </form>
+
+  <div class="list-meta"><span id="task-count">0 个任务</span><span id="loading" hidden>正在加载…</span></div>
+  <ul id="task-list" aria-live="polite"></ul>
+  <div id="empty-state" hidden><strong>还没有任务</strong><p>创建第一条任务，开始练习完整的前后端链路。</p></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/tasks.js') }}"></script>{% endblock %}
