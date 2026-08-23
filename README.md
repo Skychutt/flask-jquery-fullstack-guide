@@ -1,5 +1,7 @@
 # Flask Forge 全栈学习项目
 
+在线学习站点：<https://skychutt.github.io/flask-jquery-fullstack-guide/>
+
 本项目包含两部分：
 
 1. 根目录的 `index.html` 是可直接双击打开的中文全栈学习站点，不需要启动服务器。
