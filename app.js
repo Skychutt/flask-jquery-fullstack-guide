@@ -2,8 +2,8 @@
   "use strict";
 
   const chapters = window.COURSE || [];
-  const storageKey = "flask-forge-progress-v2";
-  const lastKey = "flask-forge-last-v2";
+  const storageKey = "flask-forge-progress-v3";
+  const lastKey = "flask-forge-last-v3";
   const themeKey = "flask-forge-theme-v1";
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));

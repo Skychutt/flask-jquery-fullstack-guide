@@ -2508,12 +2508,947 @@ LOG_LEVEL=INFO`)}
     quiz: {question: "一个功能真正达到完成定义，至少还应包含什么？", options: ["只要本机能运行", "测试、文档/迁移、可部署性与验收场景", "提交文件越多越好", "把所有变更压成一行代码"], answer: 1}
   };
 
+  const oopDeepDive = {
+    title: "Python 面向对象彻底讲透",
+    subtitle: "从对象创建、属性查找到继承、多态、组合与 Flask 分层落地",
+    duration: "6 小时",
+    keywords: "Python OOP object class instance self new init namespace bound method property descriptor inheritance MRO super polymorphism composition dependency injection dataclass SQLAlchemy",
+    intro: "本章不把面向对象停留在 class 语法，而是从 Python 的对象模型解释对象怎样产生、属性怎样查找、方法为什么自动得到 self、继承与 super 怎样协作，并最终说明这些原理如何变成 Flask 项目中的 Model、Service、Repository 和依赖注入。",
+    sections: [
+      {
+        title: "OOP 深挖 1：为什么需要对象，而不是把所有逻辑都写成函数",
+        content: `<p>面向对象的核心不是“代码必须写在 class 里”，而是把<strong>长期存在的状态</strong>和<strong>维护这些状态的规则</strong>放在同一个边界内。函数适合输入到输出的转换；对象适合拥有身份、生命周期和状态变化的业务概念。订单、账户、任务、购物车都不只是若干字段，它们还必须始终满足业务不变量。</p>
+        <p>例如订单状态不能从已发货退回待支付，账户余额不能无理由变成负数，任务完成时间只能在完成时出现。如果外部代码可以随意写 <code>order.status = "anything"</code>，这些规则会散落在路由、脚本和后台任务里。对象方法把状态转换集中起来，让所有调用入口共享同一规则。</p>
+        ${B("python · 过程式与对象式对比", `# 过程式：任何调用者都能绕过规则直接改字典
+order = {"status": "pending", "paid_at": None}
+
+def pay_order(order, paid_at):
+    if order["status"] != "pending":
+        raise ValueError("当前状态不能支付")
+    order["status"] = "paid"
+    order["paid_at"] = paid_at
+
+# 对象式：状态与合法转换被同一个边界管理
+class Order:
+    def __init__(self) -> None:
+        self._status = "pending"
+        self._paid_at = None
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    def pay(self, paid_at) -> None:
+        if self._status != "pending":
+            raise OrderStateError("当前状态不能支付")
+        self._status = "paid"
+        self._paid_at = paid_at`)}
+        <p>不要把“用了类”误认为“完成了面向对象”。一个只有静态工具函数、没有明确职责的巨大 Manager 类，通常只是换了外壳。判断是否该建对象，可问：它是否有需要维护的一组状态？是否有围绕这些状态的稳定规则？是否有清晰的业务名称？</p>
+        ${N("函数式与面向对象并不冲突：用纯函数完成数据转换，用对象保护有生命周期的状态，用服务对象编排多个对象与外部依赖。")}`
+      },
+      {
+        title: "OOP 深挖 2：类调用时发生了什么——__new__、__init__ 与 self",
+        content: `<p>执行 <code>User("Lin")</code> 时，Python 先调用类的 <code>__new__</code> 创建实例，再把新实例传给 <code>__init__</code> 完成初始化。<code>__init__</code> 不是构造对象本身，而是初始化已存在的对象，因此必须返回 None。绝大多数业务类只需实现 __init__；不可变类型子类、单例控制或底层框架才可能定制 __new__。</p>
+        ${B("python", `class User:
+    def __new__(cls, *args, **kwargs):
+        print("1. 分配实例，cls 是", cls.__name__)
+        instance = super().__new__(cls)
+        return instance
+
+    def __init__(self, name: str) -> None:
+        print("2. 初始化实例，self 是", self)
+        self.name = name
+
+user = User("Lin")
+# 等价理解：
+# instance = User.__new__(User, "Lin")
+# User.__init__(instance, "Lin")`)}
+        <p><code>self</code> 不是关键字，但它是必须遵循的社区约定，表示“当前实例”。调用 <code>user.rename("Ada")</code> 时，Python 从类上找到函数，形成绑定方法，并自动把 user 作为第一个参数传入；因此它可理解为 <code>User.rename(user, "Ada")</code>。</p>
+        ${B("python · 绑定方法", `class User:
+    def rename(self, new_name: str) -> None:
+        self.name = new_name
+
+user = User("Lin")
+bound = user.rename
+
+print(bound.__self__ is user)       # True，方法已绑定到 user
+print(bound.__func__ is User.rename) # True，底层函数来自类
+
+user.rename("Ada")
+User.rename(user, "Grace")          # 结果等价，但日常不这样调用`)}
+        ${W("不要在 __init__ 中执行慢网络请求、发送邮件或启动线程。初始化应建立合法对象；外部副作用由 Service 显式编排，否则创建对象会产生难预测行为并难以测试。")}`
+      },
+      {
+        title: "OOP 深挖 3：实例属性、类属性、命名空间与属性查找",
+        content: `<p>每个普通实例通常有自己的 <code>__dict__</code>，类也有独立命名空间。读取 <code>obj.value</code> 时，Python 会按描述符规则、实例字典、类及其父类顺序查找；写入通常落到实例上。类属性适合所有实例共享的常量或策略，不能用可变类属性保存每个用户自己的数据。</p>
+        ${B("python", `class User:
+    default_role = "member"   # 类属性：所有实例共享的默认配置
+    tags = []                  # 危险：可变对象被所有实例共享
+
+    def __init__(self, name: str) -> None:
+        self.name = name       # 实例属性：每个实例独立
+        self.roles = []        # 正确：在每次初始化时创建新列表
+
+alice = User("Alice")
+bob = User("Bob")
+
+alice.tags.append("python")
+assert bob.tags == ["python"]  # 同一个类列表，常见 bug
+
+alice.default_role = "admin"  # 在 alice 实例上创建同名属性
+assert bob.default_role == "member"
+assert User.default_role == "member"`)}
+        <p>属性查找会沿类的 MRO 继续向父类查找。实例上的同名普通属性会遮蔽类属性，但数据描述符（例如带 setter 的 property）拥有更高优先级。理解这一点能解释 SQLAlchemy 字段为何看似普通属性，却能感知赋值和生成 SQL。</p>
+        ${B("python · 三种方法", `class User:
+    table_name = "users"
+
+    def display_name(self) -> str:          # 实例方法：需要具体对象
+        return self.name
+
+    @classmethod
+    def from_json(cls, data: dict) -> "User": # 类方法：替代构造器
+        return cls(name=str(data["name"]).strip())
+
+    @staticmethod
+    def valid_name(value: str) -> bool:     # 静态方法：无需实例/类状态
+        return 1 <= len(value.strip()) <= 80`)}
+        <p>如果静态方法与类的概念关系很弱，放模块级函数更简单。类方法的典型用途是可继承的替代构造器；实例方法用于读取或改变具体对象状态。</p>`
+      },
+      {
+        title: "OOP 深挖 4：封装、property、描述符与不变量",
+        content: `<p>Python 的封装主要依靠接口约定，而非绝对 private。单下划线表示内部实现；双下划线触发名称改写，用于减少子类意外覆盖，但不是安全机制。真正的封装是：外部代码只通过稳定公开接口操作对象，内部表示以后可以改变。</p>
+        ${B("python · 用 property 保护赋值", `class Product:
+    def __init__(self, name: str, price_cents: int) -> None:
+        self.name = name
+        self.price_cents = price_cents  # 会调用下方 setter
+
+    @property
+    def price_cents(self) -> int:
+        return self._price_cents
+
+    @price_cents.setter
+    def price_cents(self, value: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("价格必须是整数分")
+        if value < 0:
+            raise ValueError("价格不能为负")
+        self._price_cents = value
+
+    @property
+    def price_yuan(self) -> str:
+        return f"{self._price_cents / 100:.2f}"`)}
+        <p>property 是描述符的一种。描述符通过 <code>__get__</code>、<code>__set__</code>、<code>__delete__</code> 接管属性访问；ORM 字段、校验字段和懒加载关系都建立在类似机制上。业务代码通常不需要自己写描述符，但理解它能避免把 ORM 属性误认为普通字典字段。</p>
+        ${B("python · 极简描述符", `class PositiveInteger:
+    def __set_name__(self, owner, name):
+        self.private_name = "_" + name
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return getattr(instance, self.private_name)
+
+    def __set__(self, instance, value):
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("必须是正整数")
+        setattr(instance, self.private_name, value)
+
+class CartItem:
+    quantity = PositiveInteger()
+
+    def __init__(self, quantity):
+        self.quantity = quantity`)}
+        <p>property 不应隐藏网络请求或昂贵数据库查询，否则看似简单的属性读取会产生不可见 I/O。昂贵动作使用明确方法名，如 <code>load_permissions()</code>。</p>`
+      },
+      {
+        title: "OOP 深挖 5：继承、MRO、super 与 Mixin",
+        content: `<p>继承表达稳定的“is-a”关系。Python 支持多继承，方法解析顺序 MRO 决定从哪个类寻找方法，可通过 <code>Class.__mro__</code> 查看。<code>super()</code> 不是简单的“调用父类”，而是沿当前 MRO 调用下一个实现，因此协作式多继承中的每一层都应继续调用 super。</p>
+        ${B("python", `class TimestampMixin:
+    def to_dict(self):
+        data = super().to_dict()
+        data["created_at"] = self.created_at.isoformat()
+        return data
+
+class BaseDTO:
+    def to_dict(self):
+        return {"id": self.id}
+
+class UserDTO(TimestampMixin, BaseDTO):
+    def to_dict(self):
+        data = super().to_dict()
+        data["name"] = self.name
+        return data
+
+print(UserDTO.__mro__)
+# UserDTO → TimestampMixin → BaseDTO → object`)}
+        <p>子类必须满足里氏替换：调用者期待父类型时，子类型不能破坏原承诺。常见坏继承是 Square 继承 Rectangle 却改变宽高赋值语义，或测试子类把本应抛出的异常吞掉。继承层次超过两三层时，要重新评估组合。</p>
+        ${B("python · super 初始化", `class AuditedService:
+    def __init__(self, *, audit_logger, **kwargs):
+        super().__init__(**kwargs)
+        self.audit_logger = audit_logger
+
+class CachedService:
+    def __init__(self, *, cache, **kwargs):
+        super().__init__(**kwargs)
+        self.cache = cache
+
+class UserService(AuditedService, CachedService):
+    def __init__(self, repository, **kwargs):
+        super().__init__(**kwargs)
+        self.repository = repository`)}
+        ${W("Mixin 应小而无独立业务身份，通常只提供一种横切能力。不要用复杂多继承拼装核心领域逻辑；组合对象更容易理解和测试。")}`
+      },
+      {
+        title: "OOP 深挖 6：多态、鸭子类型、ABC 与 Protocol",
+        content: `<p>多态意味着调用方依赖共同能力，而不是具体类。Python 的鸭子类型关注“能做什么”：只要对象提供 send 方法，通知服务就可以使用。ABC 在运行时阻止未实现抽象方法的类实例化；Protocol 在静态类型检查阶段表达结构化接口，无需显式继承。</p>
+        ${B("python · Protocol 多态", `from typing import Protocol
+
+class Notifier(Protocol):
+    def send(self, recipient: str, message: str) -> None: ...
+
+class EmailNotifier:
+    def send(self, recipient: str, message: str) -> None:
+        email_client.deliver(recipient, message)
+
+class RecordingNotifier:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def send(self, recipient: str, message: str) -> None:
+        self.messages.append((recipient, message))
+
+def welcome(email: str, notifier: Notifier) -> None:
+    notifier.send(email, "欢迎加入")`)}
+        <p>生产传 EmailNotifier，测试传 RecordingNotifier。welcome 不知道邮件 SDK，也不用 if 判断通知类型。这个结构把业务流程和基础设施解耦。接口应尽量小：只需要 send 就不要要求实现 connect、close、history 等无关方法。</p>
+        ${B("python · ABC 运行时契约", `from abc import ABC, abstractmethod
+
+class PaymentGateway(ABC):
+    @abstractmethod
+    def charge(self, order_id: int, amount_cents: int) -> str:
+        """成功返回支付流水号，失败抛 PaymentError。"""
+
+class FakeGateway(PaymentGateway):
+    def charge(self, order_id, amount_cents):
+        return f"fake-{order_id}"`)}
+        <p>多态的价值在于消除高层业务对具体实现的分支。若每次增加支付方式都要修改 OrderService 中的大量 if/elif，说明策略还没有被真正抽象。</p>`
+      },
+      {
+        title: "OOP 深挖 7：组合、依赖注入与对象协作",
+        content: `<p>组合表达“has-a”：TaskService 拥有 Repository、Notifier 和 Clock。依赖注入是从外部提供这些协作者，而不是在业务方法内部直接创建。这样依赖清晰、生命周期可控、测试能替换，且 Service 不绑定具体第三方库。</p>
+        ${B("python · 构造器注入", `class TaskService:
+    def __init__(self, repository, notifier, clock) -> None:
+        self.repository = repository
+        self.notifier = notifier
+        self.clock = clock
+
+    def complete(self, task_id: int, actor_id: int) -> Task:
+        task = self.repository.get_or_fail(task_id)
+        task.ensure_actor_can_edit(actor_id)
+        task.complete(at=self.clock.now())
+        self.repository.save(task)
+        self.notifier.send(task.owner_email, "任务已完成")
+        return task
+
+# 应用工厂负责装配一次
+service = TaskService(
+    repository=SqlAlchemyTaskRepository(db.session),
+    notifier=EmailNotifier(mail_client),
+    clock=SystemClock(),
+)`)}
+        <p>依赖注入不一定需要容器框架。小型 Flask 项目在 create_app 中手动装配最透明。路由从 current_app.extensions 或应用服务注册表获取 Service；测试创建 app 时注入 Fake。</p>
+        ${B("python · 测试替换依赖", `class FixedClock:
+    def now(self):
+        return datetime(2026, 8, 31, tzinfo=timezone.utc)
+
+repository = InMemoryTaskRepository([task])
+notifier = RecordingNotifier()
+service = TaskService(repository, notifier, FixedClock())
+
+completed = service.complete(task.id, actor_id=task.owner_id)
+
+assert completed.completed_at.isoformat() == "2026-08-31T00:00:00+00:00"
+assert notifier.messages == [(task.owner_email, "任务已完成")]`)}
+        <p>Service Locator 或全局对象会隐藏依赖，函数签名看不出需要什么。构造器注入让对象创建稍多，但换来明确边界和测试能力。</p>`
+      },
+      {
+        title: "OOP 深挖 8：特殊方法、相等、哈希与 dataclass 值对象",
+        content: `<p>特殊方法让对象参与 Python 协议：<code>__repr__</code> 提供调试表示，<code>__eq__</code> 定义值相等，<code>__hash__</code> 决定能否进入 set/dict 键，<code>__len__</code>、<code>__iter__</code> 支持容器行为，<code>__enter__/__exit__</code> 支持 with。只实现有明确语义的协议，不要追求“魔法”。</p>
+        ${B("python · 不可变值对象", `from dataclasses import dataclass
+from decimal import Decimal
+
+@dataclass(frozen=True, slots=True)
+class Money:
+    amount: Decimal
+    currency: str = "CNY"
+
+    def __post_init__(self) -> None:
+        if self.amount < 0:
+            raise ValueError("金额不能为负")
+        if len(self.currency) != 3:
+            raise ValueError("币种必须是三位代码")
+
+    def __add__(self, other: "Money") -> "Money":
+        if self.currency != other.currency:
+            raise ValueError("不同币种不能直接相加")
+        return Money(self.amount + other.amount, self.currency)
+
+price = Money(Decimal("19.90"))
+same = Money(Decimal("19.90"))
+assert price == same
+assert len({price, same}) == 1`)}
+        <p>实体以身份判断连续性，例如同 id 用户即使改名仍是同一用户；值对象由全部值决定相等，例如 Money、EmailAddress、DateRange。dataclass 很适合 DTO、命令和值对象，但 ORM 实体还要考虑框架映射和生命周期。</p>
+        ${B("python · 安全 repr", `class User:
+    def __repr__(self) -> str:
+        # 不输出 password_hash、token、身份证等敏感字段
+        return f"User(id={self.id!r}, email={self.email!r})"`)}
+        <p>可变对象若根据可变字段计算 hash，加入 set 后再修改会破坏集合查找。因此可哈希对象通常应不可变。</p>`
+      },
+      {
+        title: "OOP 深挖 9：面向对象在 Flask 项目中的正确落点",
+        content: `<p>Flask 项目中不同对象有不同职责：ORM Model 映射持久化并维护自身不变量；DTO/Schema 定义接口输入输出；Service 编排一个业务用例；Repository 封装查询；Adapter 包装邮件、支付、对象存储等外部系统；Route 只处理 HTTP 翻译。</p>
+        ${B("text · 依赖方向", `浏览器 / jQuery
+      │ HTTP + JSON
+      ▼
+Route / Blueprint
+  解析请求、认证入口、选择状态码
+      │ Command / DTO
+      ▼
+Application Service
+  编排业务流程与事务边界
+      │
+      ├── Domain Model：维护状态与不变量
+      ├── Repository：查询与保存
+      └── Adapter：邮件、支付、缓存、文件
+              │
+              ▼
+       数据库 / 外部服务`)}
+        ${B("python · 薄路由与服务", `@bp.post("/tasks")
+@login_required
+def create_task_route():
+    payload = request.get_json()
+    command = CreateTaskSchema.load(payload, actor_id=current_user.id)
+    task = current_app.services.tasks.create(command)
+    return jsonify(data=TaskDTO.from_model(task).to_dict()), 201
+
+class TaskService:
+    def create(self, command: CreateTaskCommand) -> Task:
+        project = self.projects.get_or_fail(command.project_id)
+        project.ensure_member_can_create(command.actor_id)
+        task = project.create_task(command.title, command.actor_id)
+        self.tasks.add(task)
+        self.unit_of_work.commit()
+        return task`)}
+        <p>常见反模式：Fat Model 把邮件、HTTP 和所有查询都塞进 ORM；Fat Route 在视图里写几百行业务；God Service 管理所有模块；每个简单模型都强行配 Repository/Factory/Builder。架构应随复杂度增长，先保持职责清晰，再提取真正变化的边界。</p>
+        ${P("从零实现 Project、Task、TaskService 和 Repository：项目成员才能创建任务；任务只能由负责人或管理员完成；使用 Fake Repository 和 FixedClock 写 8 个不依赖 Flask/数据库的单元测试。")}`
+      }
+    ],
+    quiz: {question: "在 Flask 分层中，‘任务从进行中变为已完成是否合法’最应该由哪里保证？", options: ["CSS class", "jQuery 点击事件", "领域对象或业务服务", "Nginx 配置"], answer: 2}
+  };
+
+  const routingDeepDive = {
+    title: "Flask 路由与请求生命周期原理",
+    subtitle: "从 WSGI 报文到 URL 匹配、上下文、视图调度和 Response 返回",
+    duration: "6 小时",
+    keywords: "Flask route routing URL Map Rule MapAdapter converter endpoint url_for Blueprint WSGI request context dispatch 404 405 HEAD OPTIONS hook middleware response",
+    intro: "本章沿着一次真实请求逐步拆开 Flask：服务器怎样调用应用、Werkzeug 怎样匹配 URL、endpoint 怎样定位视图、request 为什么看似全局、视图返回值怎样变成 HTTP Response，以及 404、405、重定向和 Blueprint 前缀到底在何时产生。",
+    sections: [
+      {
+        title: "路由原理 1：一次请求从浏览器进入 Flask 的全流程",
+        content: `<p>浏览器先解析 URL，通过 DNS 找到服务器，建立 TCP/TLS 连接并发送 HTTP 请求。生产中请求通常先到 CDN/Nginx/平台代理，再交给 Gunicorn 或 Waitress。WSGI Server 把 HTTP 信息转换成 environ 字典，并调用 Flask 应用对象。Flask 创建 RequestContext、执行路由匹配、调用视图并把返回值转换为 Response，最终由 WSGI Server 写回网络。</p>
+        ${B("text · 请求生命周期", `用户点击 / AJAX
+    │
+    ▼
+浏览器构造 HTTP 请求
+    │  GET /tasks/42?tab=comments
+    ▼
+反向代理 / WSGI Server
+    │  environ + start_response
+    ▼
+Flask.wsgi_app
+    │
+    ├─ 创建 AppContext / RequestContext
+    ├─ 打开 Session
+    ├─ URL Map 匹配 Rule → endpoint + 参数
+    ├─ before_request
+    ├─ dispatch_request → 调用视图函数
+    ├─ make_response → Response
+    ├─ after_request / 保存 Session
+    └─ teardown_request / 弹出上下文
+    │
+    ▼
+HTTP 状态码 + Header + Body 返回浏览器`)}
+        ${B("python · Flask 调用入口的简化理解", `class Flask:
+    def __call__(self, environ, start_response):
+        return self.wsgi_app(environ, start_response)
+
+    def wsgi_app(self, environ, start_response):
+        context = self.request_context(environ)
+        error = None
+        try:
+            context.push()
+            response = self.full_dispatch_request()
+            return response(environ, start_response)
+        except Exception as exc:
+            error = exc
+            response = self.handle_exception(exc)
+            return response(environ, start_response)
+        finally:
+            context.pop(error)`)}
+        <p>这是概念简化，不是要求背源码。关键是理解：路由匹配发生在视图调用之前；request 必须依赖当前上下文；视图返回的 dict/字符串还不是最终网络字节，Flask 会先规范化成 Response。</p>`
+      },
+      {
+        title: "路由原理 2：Rule、Map、MapAdapter 怎样匹配 URL",
+        content: `<p><code>@app.get()</code> 本质上调用 add_url_rule，把一个 Rule 加入应用的 URL Map。Rule 保存路径模板、允许方法、endpoint、默认值、host 等信息。收到请求后，Werkzeug 用 MapAdapter 在当前域名和脚本根路径下匹配 path 与 method，成功后得到 endpoint 和路径参数。</p>
+        ${B("python", `@app.get("/projects/<int:project_id>/tasks/<uuid:task_id>")
+def task_detail(project_id: int, task_id: UUID):
+    return {"project_id": project_id, "task_id": str(task_id)}
+
+# 概念上等价于：
+app.add_url_rule(
+    "/projects/<int:project_id>/tasks/<uuid:task_id>",
+    endpoint="task_detail",
+    view_func=task_detail,
+    methods=["GET"],
+)`)}
+        <table class="data-table"><thead><tr><th>转换器</th><th>匹配示例</th><th>视图得到的类型</th></tr></thead><tbody><tr><td>string</td><td>/users/lin</td><td>str，不含斜杠</td></tr><tr><td>int</td><td>/users/42</td><td>int</td></tr><tr><td>float</td><td>/scores/9.5</td><td>float</td></tr><tr><td>path</td><td>/files/a/b.txt</td><td>含斜杠 str</td></tr><tr><td>uuid</td><td>/items/550e8400-...</td><td>UUID</td></tr></tbody></table>
+        <p>转换器只负责路径形状与基础转换，不代表完成业务验证。<code>/users/999</code> 能匹配 int 路由，但数据库可能没有该用户，此时视图或 Service 返回 404。路径参数应表达资源身份；筛选、排序和分页更适合查询字符串。</p>
+        ${B("python · 自定义转换器", `from werkzeug.routing import BaseConverter
+
+class SlugConverter(BaseConverter):
+    regex = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+
+app.url_map.converters["slug"] = SlugConverter
+
+@app.get("/articles/<slug:slug>")
+def article_by_slug(slug):
+    return service.get_by_slug(slug)`)}
+        <p>自定义转换器适合稳定路径格式，不要在转换器里访问数据库或执行权限检查，因为它应保持纯粹、快速且可用于反向生成 URL。</p>`
+      },
+      {
+        title: "路由原理 3：endpoint、视图函数与 url_for 反向路由",
+        content: `<p>URL 是外部地址，endpoint 是应用内部对视图的稳定标识。默认 endpoint 等于函数名；Blueprint 中会加蓝图名，例如 <code>tasks.detail</code>。匹配请求时从 URL 得到 endpoint；生成链接时 url_for 根据 endpoint 和参数反向构造 URL。</p>
+        ${B("python", `tasks_bp = Blueprint("tasks", __name__, url_prefix="/tasks")
+
+@tasks_bp.get("/<int:task_id>", endpoint="detail")
+def task_detail(task_id):
+    return render_template("tasks/detail.html", task=service.get(task_id))
+
+# Blueprint endpoint：tasks.detail
+url_for("tasks.detail", task_id=42)  # /tasks/42
+
+# 多余参数会成为查询字符串
+url_for("tasks.detail", task_id=42, tab="comments")
+# /tasks/42?tab=comments`)}
+        <p>不要在模板和 JS 中到处硬编码 <code>/tasks/</code>。服务器模板通过 url_for 生成；外部 JS 可从 data-*、meta 或配置对象获得 API URL。这样部署在子路径、调整前缀或重命名路由时不需全局搜索字符串。</p>
+        ${B("jinja2 + javascript", `<button
+  class="delete-task"
+  data-delete-url="{{ url_for('api.delete_task', task_id=task.id) }}">
+  删除
+</button>
+
+<script>
+$(document).on("click", ".delete-task", function () {
+  $.ajax({ url: $(this).data("deleteUrl"), method: "DELETE" });
+});
+</script>`)}
+        <p>endpoint 必须唯一。两个视图使用相同函数名或错误复制 endpoint 会触发覆盖冲突。装饰器要用 functools.wraps 保存函数名，也是因为 Flask 可能用它生成 endpoint。</p>`
+      },
+      {
+        title: "路由原理 4：HTTP 方法、404、405、HEAD、OPTIONS 与尾斜杠",
+        content: `<p>路由匹配同时考虑路径和方法。路径完全不存在返回 404；路径存在但方法不允许返回 405，并在 Allow 头列出允许方法。GET 路由通常自动支持 HEAD；Flask/Werkzeug 也会为 OPTIONS 提供能力信息。不能把所有操作都写成 GET。</p>
+        ${B("python", `@bp.get("/tasks/<int:task_id>")
+def get_task(task_id): ...
+
+@bp.patch("/tasks/<int:task_id>")
+def update_task(task_id): ...
+
+@bp.delete("/tasks/<int:task_id>")
+def delete_task(task_id): ...
+
+# GET /tasks/42       → get_task
+# PATCH /tasks/42     → update_task
+# POST /tasks/42      → 405，因为路径存在但 POST 不允许
+# GET /unknown/42     → 404，因为没有匹配路径`)}
+        <p>尾斜杠体现集合/目录风格。规则为 <code>/tasks/</code> 时，访问 <code>/tasks</code> 通常会重定向到带斜杠地址；规则不带斜杠时，多余斜杠可能 404。API 团队应统一风格，避免 POST 在 301/302 跳转中产生方法变化风险。</p>
+        <table class="data-table"><thead><tr><th>现象</th><th>通常原因</th><th>检查方式</th></tr></thead><tbody><tr><td>404</td><td>路径/前缀/类型转换器不匹配</td><td>flask routes 与 Network URL</td></tr><tr><td>405</td><td>路径对，但 method 错</td><td>请求 Method 与 Allow Header</td></tr><tr><td>308</td><td>尾斜杠规范化</td><td>Location Header</td></tr><tr><td>CORS 预检失败</td><td>OPTIONS/允许头配置问题</td><td>查看预检请求响应</td></tr></tbody></table>
+        ${W("不要用 GET 删除数据。浏览器预取、搜索爬虫、缓存或链接扫描器可能自动访问 GET URL，造成不可恢复副作用。")}`
+      },
+      {
+        title: "路由原理 5：请求上下文与 request 数据究竟从哪里来",
+        content: `<p>WSGI environ 被 Werkzeug 包装为 Request。Flask 推入 RequestContext 后，<code>request</code> 这个 LocalProxy 才能找到当前请求；<code>current_app</code> 和 <code>g</code> 通过 AppContext 工作。它们不是普通全局变量，所以多个并发请求可以各自得到正确对象。</p>
+        ${B("python · 各类输入来源", `@bp.post("/projects/<int:project_id>/tasks")
+def create_task(project_id):
+    page = request.args.get("page", 1, type=int)       # ?page=2
+    trace_id = request.headers.get("X-Request-ID")    # Header
+    cookie = request.cookies.get("theme")             # Cookie
+    payload = request.get_json()                       # JSON Body
+    title = payload.get("title")
+    return {"project_id": project_id, "title": title}, 201`)}
+        <table class="data-table"><thead><tr><th>客户端位置</th><th>Content-Type/形式</th><th>Flask 读取</th></tr></thead><tbody><tr><td>路径</td><td>/tasks/42</td><td>视图参数 task_id</td></tr><tr><td>查询串</td><td>?q=flask&amp;tag=a</td><td>request.args / getlist</td></tr><tr><td>普通表单</td><td>x-www-form-urlencoded</td><td>request.form</td></tr><tr><td>JSON</td><td>application/json</td><td>request.get_json()</td></tr><tr><td>文件表单</td><td>multipart/form-data</td><td>request.files + request.form</td></tr><tr><td>请求头</td><td>Authorization 等</td><td>request.headers</td></tr></tbody></table>
+        <p>request.get_json 依赖 Content-Type。前端发送字符串 JSON 却写成表单类型，后端就不会按 JSON 解析。反之，传统 form 提交不应该用 get_json。解析成功只说明格式合法，仍需 Schema 校验字段、长度、范围、关联资源和权限。</p>
+        ${B("python · 上下文测试", `with app.test_request_context(
+    "/tasks/42?page=2",
+    method="GET",
+    headers={"X-Request-ID": "demo-123"},
+):
+    assert request.path == "/tasks/42"
+    assert request.args["page"] == "2"
+    assert request.headers["X-Request-ID"] == "demo-123"`)}
+        <p>请求结束后不要把 request 或 g 交给后台线程。先提取 user_id、locale 等普通值，再传给队列任务；任务在自己的应用上下文中重新查询。</p>`
+      },
+      {
+        title: "路由原理 6：视图返回值如何变成 Response",
+        content: `<p>视图函数的返回值要经过 <code>make_response</code> 规范化。字符串变成 text/html Response；dict/list 通常 JSON 化；tuple 拆成 body、status、headers；生成器可用于流式响应；真正的 Response 包含 status_code、headers、mimetype、body 和 Cookie 操作方法。</p>
+        ${B("python", `@bp.get("/examples")
+def examples():
+    return "hello"                              # 200 text/html
+
+@bp.get("/api/profile")
+def profile():
+    return {"data": {"id": 1, "name": "Lin"}} # 200 application/json
+
+@bp.post("/api/tasks")
+def create():
+    task = service.create(request.get_json())
+    return jsonify(data=task.to_dict()), 201, {
+        "Location": url_for("api.get_task", task_id=task.id)
+    }
+
+@bp.delete("/api/tasks/<int:task_id>")
+def delete(task_id):
+    service.delete(task_id)
+    return "", 204`)}
+        <p>204 响应没有 Body，前端不应继续解析 JSON。重定向返回 3xx + Location，浏览器可能自动跟随；API 客户端要了解跟随行为。文件下载设置 Content-Disposition，缓存设置 Cache-Control/ETag，Cookie 通过 response.set_cookie。</p>
+        ${B("python · 显式 Response", `response = make_response(csv_text)
+response.status_code = 200
+response.mimetype = "text/csv"
+response.headers["Content-Disposition"] = "attachment; filename=tasks.csv"
+response.headers["Cache-Control"] = "private, no-store"
+response.set_cookie(
+    "download_started", "1",
+    secure=True, httponly=True, samesite="Lax",
+)
+return response`)}
+        <p>after_request 接收到的已经是 Response，必须返回它。流式响应的上下文生命周期不同，若生成器中需要 request，可使用 stream_with_context，但应尽量在开始流之前完成所有验证。</p>`
+      },
+      {
+        title: "路由原理 7：Blueprint、钩子、错误处理和中间件的执行位置",
+        content: `<p>Blueprint 在注册时把一组 Rule、错误处理器、模板等操作应用到 app。它不是独立进程，也不自动隔离数据库。url_prefix 可以在创建蓝图或 register_blueprint 时叠加。蓝图适合按业务域组织，不应按 GET/POST 文件机械拆分。</p>
+        ${B("python · 蓝图注册", `# app/blueprints/tasks/__init__.py
+bp = Blueprint("tasks", __name__, url_prefix="/tasks")
+
+# create_app
+app.register_blueprint(tasks_bp)                # /tasks/...
+app.register_blueprint(api_bp, url_prefix="/api/v1") # /api/v1/...
+
+# endpoint 由 蓝图名.函数名 组成
+url_for("tasks.detail", task_id=42)`)}
+        <p>执行顺序可简化理解为：WSGI 中间件 → app/blueprint before_request → 视图 → 错误处理 → after_request → 保存 Session → teardown。before_request 可提前返回响应；after_request 用于加公共响应头；teardown 无论成功失败都执行，适合清理资源而不是返回业务数据。</p>
+        ${B("python · 钩子和统一错误", `@app.before_request
+def start_request():
+    g.request_id = request.headers.get("X-Request-ID", uuid4().hex)
+
+@app.after_request
+def finish_request(response):
+    response.headers["X-Request-ID"] = g.request_id
+    return response
+
+@app.errorhandler(TaskNotFound)
+def task_not_found(error):
+    if request.path.startswith("/api/"):
+        return jsonify(error={
+            "code": "TASK_NOT_FOUND",
+            "message": str(error),
+            "request_id": g.request_id,
+        }), 404
+    return render_template("errors/404.html"), 404
+
+@app.teardown_request
+def teardown(error=None):
+    if error:
+        current_app.logger.warning("request failed", exc_info=error)`)}
+        <p>WSGI 中间件包在 Flask 应用外部，适合代理修正、性能追踪等协议层能力；Flask 钩子拥有 request/current_app，适合应用级逻辑。不要在每个 before_request 无条件执行昂贵数据库查询。</p>`
+      },
+      {
+        title: "路由原理 8：系统排查 404、405、参数错误与路由冲突",
+        content: `<p>排查路由不要靠反复改路径猜测。先查看应用实际注册的 URL Map，再对比浏览器 Network 中的完整 URL、Method、Content-Type 和响应。开发环境可执行 <code>flask --app run.py routes</code>；测试中使用 app.url_map.iter_rules。</p>
+        ${B("powershell", `flask --app run.py routes
+
+# 典型输出
+Endpoint          Methods       Rule
+----------------  ------------  --------------------------
+main.index        GET           /
+api.task_list     GET           /api/tasks
+api.task_create   POST          /api/tasks
+api.task_update   PATCH         /api/tasks/<int:task_id>
+api.task_delete   DELETE        /api/tasks/<int:task_id>`)}
+        ${B("python · 路由集成测试", `def test_route_contract(app, client):
+    response = client.post("/api/tasks", json={"title": "Learn routes"})
+    assert response.status_code == 201
+    assert response.content_type == "application/json"
+
+    task_id = response.get_json()["data"]["id"]
+    assert client.get(f"/api/tasks/{task_id}").status_code == 200
+    assert client.post(f"/api/tasks/{task_id}").status_code == 405
+    assert client.get("/api/not-exists").status_code == 404`)}
+        <ul><li><strong>404：</strong>检查蓝图是否注册、url_prefix 是否重复、转换器是否匹配、尾斜杠与部署子路径。</li><li><strong>405：</strong>路径已经匹配，检查 $.ajax 的 method 与路由装饰器。</li><li><strong>415：</strong>请求 Content-Type 与后端解析方式不一致。</li><li><strong>400：</strong>JSON 语法、路径参数或框架解析失败。</li><li><strong>500：</strong>路由已进入后端，读取完整 traceback 和 request_id。</li><li><strong>endpoint 冲突：</strong>检查函数名、显式 endpoint 和装饰器 wraps。</li></ul>
+        ${P("在示例项目增加 GET /api/tasks/<id>；故意制造并记录一次 404、405、415；用 flask routes 与 Network 定位；最后写测试固定正确路径、方法、状态码和 Content-Type。")}`
+      }
+    ],
+    quiz: {question: "请求路径存在，但使用了该路由不允许的 HTTP 方法，Flask 应返回什么？", options: ["200", "404", "405", "500"], answer: 2}
+  };
+
+  const integrationDeepDive = {
+    title: "前后端对接完整链路与实战原理",
+    subtitle: "从 jQuery 事件、HTTP/JSON 到 Flask Service、事务和 DOM 状态",
+    duration: "7 小时",
+    keywords: "frontend backend integration jQuery AJAX JSON contract content-type state error CSRF cookie transaction ORM DOM CRUD sequence debugging",
+    intro: "本章把浏览器、jQuery、HTTP、Flask 路由、业务服务、SQLAlchemy 和数据库连成一条可逐段调试的链路。每一步都说明输入、输出、失败方式和责任边界，使你不再把“前后端对接”理解为仅仅会调用 $.ajax。",
+    sections: [
+      {
+        title: "对接 1：服务器渲染、传统表单和 AJAX API 三种模式",
+        content: `<p><strong>服务器渲染</strong>由 Flask 查询数据并通过 Jinja 生成完整 HTML，首屏直接可读、实现简单；<strong>传统表单</strong>提交后由 Flask 验证并重定向，天然支持无 JavaScript；<strong>AJAX</strong>只交换 JSON/片段并局部更新 DOM，交互流畅但前端需要管理更多状态。</p>
+        <table class="data-table"><thead><tr><th>模式</th><th>请求</th><th>响应</th><th>适合</th></tr></thead><tbody><tr><td>Jinja 页面</td><td>GET /tasks</td><td>完整 HTML</td><td>首屏、内容页、管理后台</td></tr><tr><td>传统表单</td><td>POST form</td><td>303 重定向/错误 HTML</td><td>简单创建、渐进增强</td></tr><tr><td>AJAX JSON</td><td>POST application/json</td><td>JSON + 状态码</td><td>局部 CRUD、即时搜索</td></tr><tr><td>混合</td><td>首屏 HTML + 后续 JSON</td><td>两者组合</td><td>Flask+jQuery 常用方案</td></tr></tbody></table>
+        ${B("python · 首屏服务器渲染", `@page_bp.get("/tasks")
+@login_required
+def task_page():
+    tasks = task_service.list_for_user(current_user.id, page=1)
+    return render_template("tasks/index.html", tasks=tasks)
+
+# 页面加载之后，搜索、勾选、删除等通过 /api/tasks 对接`)}
+        <p>不要为了“前后端分离”强行把所有页面变成 SPA。对中小型 Flask 项目，Jinja 负责首屏与结构，jQuery 负责增强交互，JSON API 负责局部数据，是成本较低且可维护的组合。</p>`
+      },
+      {
+        title: "对接 2：一次创建任务操作的端到端时序",
+        content: `<p>用户点击“添加任务”后，真正发生的是一连串契约转换。任何一段出错都应能单独观察。前端不能假设后端成功，后端也不能信任前端校验。</p>
+        ${B("text · 完整时序", `用户
+ │ 输入标题并提交
+ ▼
+jQuery submit 事件
+ │ preventDefault、读取 val、前端即时校验
+ ▼
+$.ajax
+ │ POST /api/tasks
+ │ Content-Type: application/json
+ │ X-CSRFToken: ...
+ │ {"title":"学习 Flask 路由"}
+ ▼
+Flask Route
+ │ URL/Method 匹配、认证、request.get_json
+ ▼
+Schema / DTO
+ │ 类型、长度、字段白名单、规范化
+ ▼
+TaskService
+ │ 权限、业务规则、创建领域对象
+ ▼
+Repository / SQLAlchemy
+ │ INSERT、flush、commit；异常 rollback
+ ▼
+Flask Response
+ │ 201 Created + Location
+ │ {"data":{"id":42,"title":"..."}}
+ ▼
+jQuery .done
+ │ 安全创建 DOM、更新计数、清空输入
+ ▼
+用户看到新任务
+
+任意失败 → 4xx/5xx JSON → .fail → 字段错误/Toast/重试`)}
+        <p>这条链路的每一层只做一类翻译：jQuery 把 DOM 输入转成 JSON；Route 把 HTTP 转成 Command；Service 把 Command 转成业务状态变化；Repository 把对象变化转成 SQL；Route 再把结果转成 HTTP；jQuery 把 JSON 转成 DOM。</p>
+        ${N("对接调试的关键不是同时盯着所有代码，而是沿时序确认：请求是否发出 → 路由是否命中 → 输入是否解析 → 事务是否提交 → 响应是否正确 → DOM 是否更新。")}`
+      },
+      {
+        title: "对接 3：JSON 契约、Content-Type 与数据类型映射",
+        content: `<p>接口契约要明确 URL、Method、认证、请求字段、响应字段、状态码和错误结构。<code>contentType</code> 描述 jQuery 发出的 Body；<code>dataType</code> 描述期望怎样解析响应。发送 JSON 必须 JSON.stringify 并设置 application/json。</p>
+        ${B("javascript", `const payload = {
+  title: $("#title").val().trim(),
+  priority: Number($("#priority").val()),
+  completed: $("#completed").prop("checked"),
+  tags: $("[name='tags']:checked").map(function () {
+    return this.value;
+  }).get()
+};
+
+$.ajax({
+  url: "/api/tasks",
+  method: "POST",
+  contentType: "application/json; charset=UTF-8", // 请求体
+  dataType: "json",                              // 响应解析
+  data: JSON.stringify(payload)
+});`)}
+        ${B("python", `@bp.post("/tasks")
+def create_task():
+    data = request.get_json(silent=False)
+    if not isinstance(data, dict):
+        return jsonify(error={
+            "code": "INVALID_JSON",
+            "message": "请求体必须是 JSON 对象",
+        }), 400
+
+    command = CreateTaskCommand(
+        title=str(data.get("title", "")).strip(),
+        priority=parse_priority(data.get("priority")),
+        completed=parse_bool(data.get("completed", False)),
+        tags=parse_tags(data.get("tags", [])),
+    )`)}
+        <table class="data-table"><thead><tr><th>JSON</th><th>JavaScript</th><th>Python</th><th>注意</th></tr></thead><tbody><tr><td>string</td><td>string</td><td>str</td><td>日期仍是字符串</td></tr><tr><td>number</td><td>number</td><td>int/float</td><td>金额和大整数精度</td></tr><tr><td>boolean</td><td>boolean</td><td>bool</td><td>字符串 "false" 不等于 false</td></tr><tr><td>null</td><td>null</td><td>None</td><td>与字段缺失语义不同</td></tr><tr><td>array</td><td>Array</td><td>list</td><td>逐项验证</td></tr><tr><td>object</td><td>Object</td><td>dict</td><td>字段白名单</td></tr></tbody></table>
+        <p>前端输入 Number("") 会得到 0，Number("abc") 得到 NaN；JSON.stringify 会把 NaN 转成 null。不要依赖隐式转换。日期统一 ISO 8601 + 时区，金额用整数分或十进制字符串，后端明确序列化。</p>`
+      },
+      {
+        title: "对接 4：同源、CORS、Cookie 与开发环境端口",
+        content: `<p>协议、主机、端口任一不同即不同源。若页面来自 <code>http://localhost:5000</code>，请求同地址 API 不需要 CORS；若前端在 3000、后端在 5000，浏览器会执行跨源限制，某些请求先发 OPTIONS 预检。</p>
+        ${B("text", `同源：
+页面 http://localhost:5000/tasks
+API  http://localhost:5000/api/tasks
+
+跨源：
+页面 http://localhost:3000
+API  http://localhost:5000
+                 ↑ 端口不同即不同源`)}
+        <p>跨源带 Cookie 时，前端需 <code>xhrFields: {withCredentials: true}</code>，服务器需返回精确允许源与 Access-Control-Allow-Credentials；允许凭据时不能把 Origin 写成 *。CORS 只是浏览器读取策略，不是认证与权限控制。</p>
+        ${B("javascript · 仅跨源且需要 Cookie 时", `$.ajax({
+  url: "https://api.example.com/tasks",
+  method: "GET",
+  xhrFields: { withCredentials: true }
+});`)}
+        <p>Flask+jQuery 项目最简单的部署是页面和 API 同域，由 Flask/Nginx 统一提供，减少 CORS、Cookie 域和 CSRF 配置复杂度。GitHub Pages 只能托管静态网页，不能运行 Flask 后端；本课程页面是静态教程，配套 demo 需本地或服务器运行。</p>
+        ${W("不要通过关闭浏览器安全策略解决 CORS。那只会掩盖配置问题，并让开发环境暴露更大风险。")}`
+      },
+      {
+        title: "对接 5：Flask Route、Service 与数据库事务怎样分工",
+        content: `<p>Route 应读取 HTTP 输入、调用业务用例、选择响应；Service 不应该知道 request/jsonify；Repository 不应该返回 HTTP 状态码。数据库事务通常围绕一个完整业务用例：全部操作成功才 commit，任何异常 rollback。</p>
+        ${B("python · Route 层", `@bp.post("/tasks")
+@login_required
+def create_task_route():
+    data = request.get_json()
+    command = CreateTaskSchema.load(data, actor_id=current_user.id)
+    task = current_app.services.tasks.create(command)
+    return jsonify(data=TaskDTO.from_model(task).to_dict()), 201, {
+        "Location": url_for("api.get_task", task_id=task.id)
+    }`)}
+        ${B("python · Service 与事务", `class TaskService:
+    def __init__(self, projects, tasks, unit_of_work, events):
+        self.projects = projects
+        self.tasks = tasks
+        self.uow = unit_of_work
+        self.events = events
+
+    def create(self, command):
+        project = self.projects.get_or_fail(command.project_id)
+        project.ensure_can_create_task(command.actor_id)
+
+        task = Task.create(
+            project_id=project.id,
+            title=command.title,
+            creator_id=command.actor_id,
+        )
+        self.tasks.add(task)
+        try:
+            self.uow.commit()
+        except Exception:
+            self.uow.rollback()
+            raise
+
+        self.events.publish_after_commit(TaskCreated(task.id))
+        return task`)}
+        ${B("python · Repository 层", `class SqlAlchemyTaskRepository:
+    def __init__(self, session):
+        self.session = session
+
+    def add(self, task):
+        self.session.add(task)
+
+    def get_or_fail(self, task_id):
+        task = self.session.get(Task, task_id)
+        if task is None:
+            raise TaskNotFound(task_id)
+        return task`)}
+        <p>邮件或队列发布最好在事务提交后执行；若要求数据库变化与事件绝不丢失，使用 outbox 模式。不要 commit 后才发现 DTO 序列化访问了已关闭会话的懒加载关系，列表所需数据应在事务/Session 有效时明确加载。</p>`
+      },
+      {
+        title: "对接 6：前端状态机——加载、成功、空数据、校验失败和网络失败",
+        content: `<p>一个可靠 AJAX 交互至少有 idle、validating、submitting、success、validation-error、network-error 等状态。按钮在提交中禁用避免重复，字段错误显示在控件旁，网络错误允许重试，成功后只根据服务器返回的权威数据更新 DOM。</p>
+        ${B("javascript", `function setFormState($form, state) {
+  const busy = state === "submitting";
+  $form.attr("aria-busy", String(busy));
+  $form.find(":input").prop("disabled", busy);
+  $form.find("[type='submit']").text(busy ? "保存中…" : "保存");
+  $form.toggleClass("has-error", state === "error");
+}
+
+function submitTask($form) {
+  clearFieldErrors($form);
+  setFormState($form, "submitting");
+
+  return TaskApi.create(readTaskForm($form))
+    .done(function (response) {
+      $("#task-list").prepend(renderTask(response.data));
+      $form[0].reset();
+      showToast("任务已创建");
+    })
+    .fail(function (xhr) {
+      if (xhr.status === 422) {
+        showFieldErrors($form, xhr.responseJSON.error.fields);
+      } else {
+        showRetryableError(normalizeApiError(xhr));
+      }
+    })
+    .always(function () {
+      setFormState($form, "idle");
+    });
+}`)}
+        <p>后端错误结构要稳定，前端按 status + error.code 分支，而不是匹配中文 message。错误消息可以变化或国际化，错误码应保持契约。前端永远用 text() 展示不可信内容，避免 XSS。</p>
+        ${B("json · 422 字段错误", `{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "参数校验失败",
+    "fields": {
+      "title": "标题不能为空",
+      "due_at": "截止时间必须包含时区"
+    },
+    "request_id": "req_8f31"
+  }
+}`)}
+        <p>204 删除成功没有 JSON；401 引导登录；403 提示无权限；404 说明资源已不存在；409/412 提示并发冲突；429 可显示稍后重试；5xx 显示通用信息并保留 request_id 供排查。</p>`
+      },
+      {
+        title: "对接 7：Session 登录、CSRF 与 AJAX 修改请求",
+        content: `<p>Session Cookie 会被浏览器自动附加到同站请求，所以 Flask 能从 Session 得知 current_user；也正因为自动附加，攻击网站可能诱导浏览器发修改请求，这就是 CSRF。所有 POST/PATCH/DELETE 应验证 CSRF Token。</p>
+        ${B("jinja2", `<meta name="csrf-token" content="{{ csrf_token() }}">
+<script src="{{ url_for('static', filename='vendor/jquery.min.js') }}"></script>
+<script>
+$.ajaxSetup({
+  beforeSend: function (xhr, settings) {
+    const safe = /^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type);
+    const sameOrigin = !/^https?:\/\//i.test(settings.url);
+    if (!safe && sameOrigin) {
+      xhr.setRequestHeader(
+        "X-CSRFToken",
+        $("meta[name='csrf-token']").attr("content")
+      );
+    }
+  }
+});
+</script>`)}
+        <p>Cookie 设置 HttpOnly 防止普通 JS 读取，Secure 仅 HTTPS，SameSite=Lax/Strict 降低跨站发送。CSRF Token 不是登录 Token，它证明修改请求来自获准页面。XSS 可在合法页面发请求，因此输出转义和 CSP 仍然重要。</p>
+        ${B("python · 权限必须在后端检查", `@bp.delete("/tasks/<int:task_id>")
+@login_required
+def delete_task(task_id):
+    task = task_repository.get_or_fail(task_id)
+    if task.owner_id != current_user.id and not current_user.can("task:any_delete"):
+        abort(403)
+    task_service.delete(task, actor_id=current_user.id)
+    return "", 204`)}
+        <p>前端隐藏删除按钮只是用户体验，攻击者可以直接调用 API。后端必须对每个对象检查所有权/角色，防止 IDOR。路由参数中的 task_id 不能被视为授权证明。</p>`
+      },
+      {
+        title: "对接 8：重复提交、竞态、取消旧请求与乐观更新",
+        content: `<p>网络可能超时、用户可能双击、搜索请求可能乱序返回、两位用户可能同时修改。前后端对接必须考虑时间顺序，而不是只处理单次成功路径。</p>
+        ${B("javascript · 搜索取消旧请求", `let pendingSearch = null;
+
+function searchTasks(keyword) {
+  if (pendingSearch) pendingSearch.abort();
+
+  pendingSearch = $.getJSON("/api/tasks", { q: keyword })
+    .done(function (response) {
+      renderTaskList(response.data);
+    })
+    .fail(function (xhr, status) {
+      if (status !== "abort") showApiError(xhr);
+    })
+    .always(function () {
+      pendingSearch = null;
+    });
+}`)}
+        ${B("javascript · 可回滚的乐观更新", `function toggleCompleted($row, completed) {
+  const previous = $row.hasClass("is-completed");
+  $row.toggleClass("is-completed", completed).addClass("is-saving");
+
+  TaskApi.update($row.data("taskId"), {
+    completed: completed,
+    version: Number($row.data("version"))
+  }).done(function (response) {
+    $row.data("version", response.data.version);
+  }).fail(function (xhr) {
+    $row.toggleClass("is-completed", previous);
+    if (xhr.status === 409) showToast("任务已被修改，请刷新后重试");
+    else showApiError(xhr);
+  }).always(function () {
+    $row.removeClass("is-saving");
+  });
+}`)}
+        <p>支付/下单等不可重复创建使用 Idempotency-Key；普通表单提交先禁用按钮；并发编辑使用 version/ETag；搜索使用防抖与取消；乐观 UI 必须能回滚。后端数据库唯一约束是最终防线，不能只依赖按钮 disabled。</p>`
+      },
+      {
+        title: "对接 9：完整 CRUD 实战骨架与逐层调试清单",
+        content: `<p>下面是一套可复用的 CRUD 对接顺序。先完成列表读取，再做创建，然后修改与删除；每一步都用 Network 和后端测试固定契约，不要四个接口同时写完才调试。</p>
+        ${B("text · 实现顺序", `1. 数据模型与迁移
+   Task(id, title, completed, owner_id, version, created_at)
+
+2. 业务规则
+   标题 1..120；只有 owner 可改；version 防覆盖
+
+3. API 契约
+   GET    /api/tasks?page=1
+   POST   /api/tasks
+   PATCH  /api/tasks/<id>
+   DELETE /api/tasks/<id>
+
+4. 后端测试
+   200/201/204、400/401/403/404/409/422
+
+5. 首屏 HTML
+   表单、列表根节点、加载/空/错误容器
+
+6. jQuery 组件
+   submit、事件委托、AJAX Client、render 函数
+
+7. 联调与安全
+   Content-Type、CSRF、Cookie、权限、XSS
+
+8. 生产检查
+   日志 request_id、事务、分页、限速、监控`)}
+        ${B("javascript · API Client 集中管理", `const TaskApi = {
+  list: params => $.getJSON("/api/tasks", params),
+
+  create: data => $.ajax({
+    url: "/api/tasks",
+    method: "POST",
+    contentType: "application/json",
+    dataType: "json",
+    data: JSON.stringify(data)
+  }),
+
+  update: (id, data) => $.ajax({
+    url: "/api/tasks/" + encodeURIComponent(id),
+    method: "PATCH",
+    contentType: "application/json",
+    dataType: "json",
+    data: JSON.stringify(data)
+  }),
+
+  remove: id => $.ajax({
+    url: "/api/tasks/" + encodeURIComponent(id),
+    method: "DELETE"
+  })
+};`)}
+        <h5>逐层调试清单</h5>
+        <ol><li>Console 是否有 JavaScript 语法/选择器错误？</li><li>Network 是否出现请求？URL、Method、Payload、Content-Type 是否正确？</li><li>响应是 404、405、415、422 还是 500？不要只看“请求失败”。</li><li>Flask 访问日志是否出现这条请求？endpoint 是否命中？</li><li>request.get_json 得到什么类型？Schema 错误是什么？</li><li>Service 权限与业务规则是否通过？异常映射成什么状态码？</li><li>SQL 是否执行？事务是否 commit/rollback？是否违反唯一/外键约束？</li><li>响应 JSON 是否符合契约？Content-Type 是否 application/json？</li><li>done/fail 是否进入预期分支？动态元素是否使用事件委托？</li><li>DOM 更新是否使用服务器返回 ID/version，用户文本是否通过 text()？</li></ol>
+        ${P("在 demo 中完整跟踪一次创建任务：为请求添加 request_id；在浏览器 Network 记录请求与响应；在 Route、Service、Repository 各写出输入输出；补 401、403、409、422 测试；前端为每类错误显示不同状态。")}`
+      }
+    ],
+    quiz: {question: "一次 AJAX 创建任务成功后，前端最可靠的数据来源是什么？", options: ["提交前自己猜测的临时对象", "服务器 201 响应返回的权威对象", "按钮上的文字", "浏览器缓存中的旧列表"], answer: 1}
+  };
+
   course.splice(4, 0, pythonAdvanced);
   course.splice(7, 0, apiDesign);
   course.splice(10, 0, flaskInternals);
   course.splice(12, 0, javascriptFoundations);
   course.splice(17, 0, advancedSql);
   course.splice(22, 0, teamWorkflow);
+  course.splice(3, 0, oopDeepDive);
+  course.splice(10, 0, routingDeepDive);
+  course.splice(18, 0, integrationDeepDive);
 
   window.COURSE = course.map(chapter => ({
     ...chapter,

@@ -11,14 +11,17 @@
 
 直接打开 `index.html`。站点包含：
 
-- 24 个系统章节、125 个深度小节和 24 组章节自测
+- 27 个系统章节、151 个深度小节和 27 组章节自测
 - Python Web 必备语法与面向对象、SOLID 和分层设计
+- Python 面向对象深挖：对象创建、self、属性查找、property、MRO、super、多态、组合与依赖注入
 - Python 进阶：装饰器、闭包、生成器、Protocol、上下文和并发模型
 - HTTP、JSON、Flask、Jinja、应用工厂和 Blueprint
 - REST API 规范、Schema、幂等、乐观锁、版本演进和 OpenAPI
 - Flask WSGI、上下文、生命周期、中间件和常用扩展生态
+- Flask 路由原理：URL Map、Rule、endpoint、转换器、404/405、Blueprint、钩子和 Response
 - JavaScript 变量、类型、函数、对象、Promise、事件循环和浏览器存储
 - jQuery DOM、事件委托、表单、AJAX 与 JSON API 联调
+- 前后端对接全链路：jQuery → HTTP/JSON → Flask Route → Service → ORM/事务 → DOM 状态
 - SQL、SQLAlchemy、复杂查询、执行计划、索引、锁、事务与迁移
 - 登录认证、对象授权、CSRF、XSS、SQL 注入与上传安全
 - pytest、调试、日志、缓存、后台任务和生产部署
